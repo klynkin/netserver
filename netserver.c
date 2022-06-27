@@ -15,10 +15,11 @@
 static int clients_qty = MAX_CLIENTS_QTY;
 
 static int sock, newsock[MAX_CLIENTS_QTY];
- 
-void term_handler(int i){ 
+
+void term_handler(void){
+
 	printf ("Terminating\n");
-	for (i = 0; i < MAX_CLIENTS_QTY; i++){ 
+	for (int i = 0; i < MAX_CLIENTS_QTY; i++){ 
 		close(newsock[i]);
 	}
 	close(sock);
@@ -62,16 +63,20 @@ void * thread_func(void *arg)
 
 int main(int argc, char ** argv)
 {
+
 	int port, clen; 
 	struct sigaction sa;
 	sigset_t newset;
+
+	/* TODO Add sigmask */
 	sigemptyset(&newset);
 	sa.sa_handler = term_handler;
 	sigaction(SIGTERM, &sa, 0);
 	sigaction(SIGINT, &sa, 0);
 	
 	pthread_t threads[MAX_CLIENTS_QTY];
-	
+	int sock_numbers[MAX_CLIENTS_QTY];
+
 	struct sockaddr_in serv_addr, cli_addr[10];
 
 	if (argc < 2) 
@@ -79,6 +84,7 @@ int main(int argc, char ** argv)
 		fprintf(stderr,"usage: %s <port_number>\n", argv[0]);
 		return EXIT_FAILURE;
 	}
+
 	sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (socket < 0){
 		printf("socket() failed: %d\n", errno);
@@ -98,28 +104,34 @@ int main(int argc, char ** argv)
 	clen = sizeof(cli_addr);
 
 	char *wait_info_message = "Wait for your partner connection\n";
-	int i = 0;
-	for (i = 0; i < MAX_CLIENTS_QTY; i++){
-		int sock_number = i;
+	int i;
+
+	for (int i = 0; i < clients_qty; i++){
+		sock_numbers[i] = i;
 		newsock[i] = accept(sock, (struct sockaddr *) &cli_addr[i], &clen);
+
+		if (newsock[i] < 0){
+			printf("accept() failed: %d\n", errno);
+			return EXIT_FAILURE;
+		}
+
 		if (i == 0){
 			write(newsock[i], wait_info_message, strlen(wait_info_message));
 		}
-		pthread_create(&threads[i], NULL, thread_func, &sock_number);
-		sleep(1);
+
+		pthread_create(&threads[i], NULL, thread_func, &sock_numbers[i]);
 	}
 
-	/* Info message about connection */
+	/* TODO fix write to closed scoket */
 	char *connection_info_message = "Your partner has connected!\n";
-	write(newsock[0], connection_info_message, strlen(connection_info_message));
+    write(newsock[0], connection_info_message, strlen(connection_info_message));
 	write(newsock[1], connection_info_message, strlen(connection_info_message));
 
-	if (newsock[i] < 0){
-		printf("accept() failed: %d\n", errno);
-		return EXIT_FAILURE;
+
+	for (int i = 0; i < MAX_CLIENTS_QTY; i++){
+		pthread_join(threads[i], NULL);
 	}
+
+	return 0;
 	
-	while(1){
-		sleep(1);
-	};
 }
