@@ -8,6 +8,7 @@
 #include <signal.h>
 #include <pthread.h>
 #include <string.h>
+#include <unistd.h>
 
 #define MAX_CLIENTS_QTY 2
 #define BUF_SIZE 256
@@ -16,7 +17,7 @@ static int clients_qty = MAX_CLIENTS_QTY;
 
 static int sock, newsock[MAX_CLIENTS_QTY];
 
-void term_handler(void){
+void term_handler(int){
 
 	printf ("Terminating\n");
 	for (int i = 0; i < MAX_CLIENTS_QTY; i++){ 
@@ -41,7 +42,7 @@ void * thread_func(void *arg)
 		if (strcmp(buf, "shutdown\r\n") == 0){
 			close(newsock[sock_number]);
 			printf("Clients terminated\n");
-			return;
+			return NULL;
 		}
 		/* Prepare to retransmitting it to another client */
 		sprintf(answer, "%s\0", buf);
@@ -58,13 +59,14 @@ void * thread_func(void *arg)
 			buf[i]=0;
 		}
 	}
-	return;
+	return NULL;
 }
 
 int main(int argc, char ** argv)
 {
 
-	int port, clen; 
+	int port;
+	socklen_t clen; 
 	struct sigaction sa;
 	sigset_t newset;
 
@@ -133,5 +135,4 @@ int main(int argc, char ** argv)
 	}
 
 	return 0;
-	
 }

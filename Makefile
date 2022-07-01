@@ -1,10 +1,6 @@
 all: netdemo
-fsdemo:
-	gcc fsserver.c -o fsserver
 netdemo:
-	gcc netserver.c -o netserver -pthread
-install:
-	cp fsserver ~/bin
+	g++ netserver.cpp -o netserver -pthread
 clean:
 	 rm -f *.o
 	 rm -f *server
