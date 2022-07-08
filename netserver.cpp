@@ -9,19 +9,25 @@
 #include <pthread.h>
 #include <string.h>
 #include <unistd.h>
+#include <set>
+#include <iostream>
 
 #define MAX_CLIENTS_QTY 2
 #define BUF_SIZE 256
 
 static int clients_qty = MAX_CLIENTS_QTY;
 
-static int sock, newsock[MAX_CLIENTS_QTY];
+static int sock;
+
+static pthread_mutex_t sock_number_mutex;
+
+static std::set<int> sockets;
 
 void term_handler(int){
 
 	printf ("Terminating\n");
-	for (int i = 0; i < MAX_CLIENTS_QTY; i++){ 
-		close(newsock[i]);
+	for (auto socket: sockets){
+		close(socket);
 	}
 	close(sock);
 	exit(EXIT_SUCCESS);
@@ -30,28 +36,29 @@ void term_handler(int){
 void * thread_func(void *arg)
 {
 	int sock_number = *((int *)arg);
+	pthread_mutex_unlock(&sock_number_mutex);
+
 	char buf[BUF_SIZE];
 	char answer[BUF_SIZE];
 
 	while(1){
 		
 		/* Wait for a message from another client */
-		read(newsock[sock_number], buf, BUF_SIZE-1);
+		read(sock_number, buf, BUF_SIZE-1);
 
 		/* Check if shutdown command */
 		if (strcmp(buf, "shutdown\r\n") == 0){
-			close(newsock[sock_number]);
+			close(sock_number);
 			printf("Clients terminated\n");
 			return NULL;
 		}
 		/* Prepare to retransmitting it to another client */
 		sprintf(answer, "%s\0", buf);
 		
-		if (sock_number == 1){
-			write(newsock[0], answer, strlen(answer));
-		}
-		else{
-			write(newsock[1], answer, strlen(answer));
+		for (auto socket: sockets){
+			if (socket != sock_number){
+				write(socket, answer, strlen(answer));
+			}
 		}
 
 		/* Clear buffer */
@@ -69,6 +76,7 @@ int main(int argc, char ** argv)
 	socklen_t clen; 
 	struct sigaction sa;
 	sigset_t newset;
+	pthread_mutex_init(&sock_number_mutex, NULL);
 
 	/* TODO Add sigmask */
 	sigemptyset(&newset);
@@ -109,26 +117,31 @@ int main(int argc, char ** argv)
 	int i;
 
 	for (int i = 0; i < clients_qty; i++){
-		sock_numbers[i] = i;
-		newsock[i] = accept(sock, (struct sockaddr *) &cli_addr[i], &clen);
+		pthread_mutex_lock(&sock_number_mutex);
+		int sock_number = accept(sock, (struct sockaddr *) &cli_addr[i], &clen);
 
-		if (newsock[i] < 0){
+		if (sock_number < 0){
 			printf("accept() failed: %d\n", errno);
 			return EXIT_FAILURE;
 		}
+		sockets.insert(sock_number);
 
 		if (i == 0){
-			write(newsock[i], wait_info_message, strlen(wait_info_message));
+			write(sock_number, wait_info_message, strlen(wait_info_message));
 		}
 
-		pthread_create(&threads[i], NULL, thread_func, &sock_numbers[i]);
+		pthread_create(&threads[i], NULL, thread_func, &sock_number);
 	}
+
+	pthread_mutex_lock(&sock_number_mutex);
 
 	/* TODO fix write to closed scoket */
 	char *connection_info_message = "Your partner has connected!\n";
-    write(newsock[0], connection_info_message, strlen(connection_info_message));
-	write(newsock[1], connection_info_message, strlen(connection_info_message));
+	for (auto socket: sockets){
+		write(socket, connection_info_message, strlen(connection_info_message));
+	}
 
+	pthread_mutex_unlock(&sock_number_mutex);
 
 	for (int i = 0; i < MAX_CLIENTS_QTY; i++){
 		pthread_join(threads[i], NULL);
