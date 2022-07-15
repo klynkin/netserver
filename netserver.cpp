@@ -12,10 +12,10 @@
 #include <set>
 #include <iostream>
 
-#define MAX_CLIENTS_QTY 2
+#define MAX_CLIENTS_QTY 3
 #define BUF_SIZE 256
 
-static int clients_qty = MAX_CLIENTS_QTY;
+static int clients_qty = 0;
 
 static int sock;
 
@@ -50,6 +50,9 @@ void * thread_func(void *arg)
 		if (strcmp(buf, "shutdown\r\n") == 0){
 			close(sock_number);
 			printf("Clients terminated\n");
+			clients_qty--;
+			printf("clients_qty %d\n", clients_qty);
+			sockets.extract(sock_number);
 			return NULL;
 		}
 		/* Prepare to retransmitting it to another client */
@@ -84,10 +87,9 @@ int main(int argc, char ** argv)
 	sigaction(SIGTERM, &sa, 0);
 	sigaction(SIGINT, &sa, 0);
 	
-	pthread_t threads[MAX_CLIENTS_QTY];
-	int sock_numbers[MAX_CLIENTS_QTY];
+	pthread_t threads;
 
-	struct sockaddr_in serv_addr, cli_addr[10];
+	struct sockaddr_in serv_addr, cli_addr;
 
 	if (argc < 2) 
 	{
@@ -113,39 +115,48 @@ int main(int argc, char ** argv)
 	listen(sock, 1);
 	clen = sizeof(cli_addr);
 
-	char *wait_info_message = "Wait for your partner connection\n";
-	int i;
+	char *wait_info_message = "No other clients now. Wait for partners\n";
 
-	for (int i = 0; i < clients_qty; i++){
-		pthread_mutex_lock(&sock_number_mutex);
-		int sock_number = accept(sock, (struct sockaddr *) &cli_addr[i], &clen);
+	do  {
+		if (clients_qty < MAX_CLIENTS_QTY) {
+			pthread_mutex_lock(&sock_number_mutex);
 
-		if (sock_number < 0){
-			printf("accept() failed: %d\n", errno);
-			return EXIT_FAILURE;
+			int sock_number = accept(sock, (struct sockaddr *)&cli_addr, &clen);
+			if (sock_number < 0){
+				printf("accept() failed: %d\n", errno);
+				return EXIT_FAILURE;
+			}
+			sockets.insert(sock_number);
+
+			clients_qty ++;
+
+			if (clients_qty == 1){
+				write(sock_number, wait_info_message, strlen(wait_info_message));
+			}
+
+			pthread_create(&threads, NULL, thread_func, &sock_number);
+
+			pthread_mutex_lock(&sock_number_mutex);
+
+			/* TODO fix write to closed scoket */
+			char *connection_info_message = "New partner has connected!\n";
+			for (auto socket: sockets){
+				write(socket, connection_info_message, strlen(connection_info_message));
+			}
+
+			printf("clients_qty %d\n", clients_qty);
+			pthread_mutex_unlock(&sock_number_mutex);
 		}
-		sockets.insert(sock_number);
-
-		if (i == 0){
-			write(sock_number, wait_info_message, strlen(wait_info_message));
+		else {
+			printf("clients_qty %d\n", clients_qty);
+			sleep(1);
 		}
+	} while (clients_qty > 0);
 
-		pthread_create(&threads[i], NULL, thread_func, &sock_number);
-	}
-
-	pthread_mutex_lock(&sock_number_mutex);
-
-	/* TODO fix write to closed scoket */
-	char *connection_info_message = "Your partner has connected!\n";
-	for (auto socket: sockets){
-		write(socket, connection_info_message, strlen(connection_info_message));
-	}
-
-	pthread_mutex_unlock(&sock_number_mutex);
-
-	for (int i = 0; i < MAX_CLIENTS_QTY; i++){
-		pthread_join(threads[i], NULL);
-	}
+	printf("lol\n");
+	// for (int i = 0; i < MAX_CLIENTS_QTY; i++){
+	// 	pthread_join(threads[i], NULL);
+	// }
 
 	return 0;
 }

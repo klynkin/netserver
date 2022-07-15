@@ -1,6 +1,9 @@
+CXX		= g++
+CXXFLAGS	= -std=c++17 -ggdb -Wall
+
 all: netdemo
 netdemo:
-	g++ netserver.cpp -o netserver -pthread
+	${CXX} ${CXXFLAGS} netserver.cpp -o netserver -pthread
 clean:
 	 rm -f *.o
 	 rm -f *server
