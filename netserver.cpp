@@ -10,7 +10,9 @@
 #include <string.h>
 #include <unistd.h>
 #include <set>
+#include <map>
 #include <iostream>
+#include <algorithm>
 
 #define MAX_CLIENTS_QTY 3
 #define BUF_SIZE 256
@@ -23,12 +25,27 @@ static pthread_mutex_t sock_number_mutex;
 
 static std::set<int> sockets;
 
+/* Matches socket numbers and user names */
+static std::map <int, std::string> user_names;
+
+/* Removes specials symbols */
+static std::string removeSpecials(std::string str) {
+
+	std::string chars = "\r\n";
+ 
+    for (char c: chars)
+        str.erase(std::remove(str.begin(), str.end(), c), str.end());
+
+	return str;
+}
+
 void term_handler(int){
 
-	printf ("Terminating\n");
-	for (auto socket: sockets){
+	std::cout << "Terminating\n" << std::endl;
+	
+	for (auto socket: sockets)
 		close(socket);
-	}
+
 	close(sock);
 	exit(EXIT_SUCCESS);
 }
@@ -39,35 +56,58 @@ void * thread_func(void *arg)
 	pthread_mutex_unlock(&sock_number_mutex);
 
 	char buf[BUF_SIZE];
-	char answer[BUF_SIZE];
+	std::string answer;
+	std::string name;
 
-	while(1){
+	/* TODO Name checking */
+	write(sock_number, std::string("Write your name\n").c_str(), std::string("Write your name\n").length());
+	read(sock_number, buf, BUF_SIZE-1);
+
+	sockets.insert(sock_number);
+
+	name = removeSpecials(std::string(buf));
+
+	/* TODO log wrapper */
+	std::cout << "New client " << name << std::endl;
+
+	if (user_names.count(sock_number) == 0)
+		user_names[sock_number] = name;
+
+	std::string server_message = std::string("Server: new client ") + name + std::string(" has connected\n");
+
+	for (auto socket: sockets)
+		if (socket != sock_number) 
+			write(socket, server_message.c_str(), strlen(server_message.c_str()));
+
+	while(1) {
 		
 		/* Wait for a message from another client */
 		read(sock_number, buf, BUF_SIZE-1);
 
 		/* Check if shutdown command */
-		if (strcmp(buf, "shutdown\r\n") == 0){
+		if (strcmp(buf, "shutdown\r\n") == 0) {
 			close(sock_number);
-			printf("Clients terminated\n");
+			std::cout << "Clients terminated" << std::endl;
 			clients_qty--;
-			printf("clients_qty %d\n", clients_qty);
+			std::cout << "clients_qty " << clients_qty << std::endl;
 			sockets.extract(sock_number);
 			return NULL;
 		}
-		/* Prepare to retransmitting it to another client */
-		sprintf(answer, "%s\0", buf);
+
+		std::cout << "Client " << name << ": " << std::string(buf) << std::endl;
 		
-		for (auto socket: sockets){
-			if (socket != sock_number){
-				write(socket, answer, strlen(answer));
-			}
-		}
+		/* Prepare to retransmitting it to another client */
+		answer = name + std::string(": ") + std::string(buf);
+		
+		std::cout << answer << std::endl;
+
+		for (auto socket: sockets)
+			if (socket != sock_number)
+				write(socket, answer.c_str(), strlen(answer.c_str()));
 
 		/* Clear buffer */
-		for (int i=0; i<BUF_SIZE; i++){
+		for (int i=0; i<BUF_SIZE; i++) 
 			buf[i]=0;
-		}
 	}
 	return NULL;
 }
@@ -93,13 +133,13 @@ int main(int argc, char ** argv)
 
 	if (argc < 2) 
 	{
-		fprintf(stderr,"usage: %s <port_number>\n", argv[0]);
+		std::cerr << "usage: " << argv[0] << "<port_number>" << std::endl;
 		return EXIT_FAILURE;
 	}
 
 	sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (socket < 0){
-		printf("socket() failed: %d\n", errno);
+		std::cout << "socket() failed: " << errno << std::endl;
 		return EXIT_FAILURE;
 	}
 
@@ -108,8 +148,8 @@ int main(int argc, char ** argv)
 	serv_addr.sin_family = AF_INET;
 	serv_addr.sin_addr.s_addr = INADDR_ANY;
 	serv_addr.sin_port = htons(port);
-	if (bind(sock, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0){
-		printf("bind() failed: %d\n", errno);
+	if (bind(sock, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+		std::cout << "bind() failed: " << errno << std::endl;
 		return EXIT_FAILURE;
 	}
 	listen(sock, 1);
@@ -117,16 +157,16 @@ int main(int argc, char ** argv)
 
 	char *wait_info_message = "No other clients now. Wait for partners\n";
 
+	/* This is infinfty cycle for server */
 	do  {
 		if (clients_qty < MAX_CLIENTS_QTY) {
 			pthread_mutex_lock(&sock_number_mutex);
 
 			int sock_number = accept(sock, (struct sockaddr *)&cli_addr, &clen);
-			if (sock_number < 0){
-				printf("accept() failed: %d\n", errno);
+			if (sock_number < 0) {
+				std::cout << "accept() failed: " << errno <<  std::endl;
 				return EXIT_FAILURE;
 			}
-			sockets.insert(sock_number);
 
 			clients_qty ++;
 
@@ -135,28 +175,11 @@ int main(int argc, char ** argv)
 			}
 
 			pthread_create(&threads, NULL, thread_func, &sock_number);
-
-			pthread_mutex_lock(&sock_number_mutex);
-
-			/* TODO fix write to closed scoket */
-			char *connection_info_message = "New partner has connected!\n";
-			for (auto socket: sockets){
-				write(socket, connection_info_message, strlen(connection_info_message));
-			}
-
-			printf("clients_qty %d\n", clients_qty);
-			pthread_mutex_unlock(&sock_number_mutex);
 		}
-		else {
-			printf("clients_qty %d\n", clients_qty);
+		else
 			sleep(1);
-		}
-	} while (clients_qty > 0);
 
-	printf("lol\n");
-	// for (int i = 0; i < MAX_CLIENTS_QTY; i++){
-	// 	pthread_join(threads[i], NULL);
-	// }
+	} while (clients_qty > 0);
 
 	return 0;
 }
